@@ -19,6 +19,7 @@ PRICES = {
     "secret_10k_access": 0.03,
     "gcs_gb_month": 0.02,
     "gcs_10k_class_a": 0.05,
+    "registry_gb_month": 0.1,
 }
 REGION = "us-central1"
 
@@ -56,6 +57,15 @@ def database():
 
 def plan(*resources):
     return {"planned_values": {"root_module": {"child_modules": [{"resources": list(resources)}]}}}
+
+
+def registry():
+    return {
+        "address": "google_artifact_registry_repository.ledger",
+        "mode": "managed",
+        "type": "google_artifact_registry_repository",
+        "values": {"location": REGION},
+    }
 
 
 def total(lines):
@@ -145,3 +155,22 @@ def test_unknown_resource_fails_the_gate(tmp_path):
     vm = {"address": "google_compute_instance.x", "mode": "managed",
           "type": "google_compute_instance", "values": {}}
     assert run_cli(tmp_path, [vm]) == 1
+
+
+def test_registry_within_free_gb_costs_zero():
+    lines, unknown = cost.estimate({"dev": plan(registry())}, usage(registry_storage_gb=0.5), book())
+    assert total(lines) == 0 and unknown == []
+
+
+def test_registry_storage_over_free_gb_is_billed():
+    lines, _ = cost.estimate({"dev": plan(registry())}, usage(registry_storage_gb=2.5), book())
+    # 2,5 GB - 0,5 GB gratis = 2 GB x 0,10 USD
+    assert total(lines) == pytest.approx(0.2)
+    assert "2.5 GB" in lines[0].detail
+
+
+def test_registry_without_price_fails_instead_of_costing_zero():
+    prices = {k: v for k, v in PRICES.items() if k != "registry_gb_month"}
+    with pytest.raises(cost.PriceNotFound):
+        cost.estimate({"dev": plan(registry())}, usage(),
+                      cost.PriceBook({REGION: prices}, offline=True))

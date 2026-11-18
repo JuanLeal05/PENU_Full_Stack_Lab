@@ -95,6 +95,14 @@
               "mode": "managed",
               "type": "google_cloud_run_v2_service_iam_member",
               "values": {}
+            },
+            {
+              "address": "google_artifact_registry_repository.ledger",
+              "mode": "managed",
+              "type": "google_artifact_registry_repository",
+              "values": {
+                "location": "us-central1"
+              }
             }
           ]
         }
