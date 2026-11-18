@@ -260,3 +260,21 @@ output "registry" {
   description = "Ruta base de las imagenes."
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ledger.repository_id}"
 }
+
+# El agente de servicio de Cloud Run descarga la imagen al crear cada revision; necesita leer el repositorio.
+resource "google_artifact_registry_repository_iam_member" "run_agent" {
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.ledger.repository_id
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:service-${data.google_project.this.number}@serverless-robot-prod.iam.gserviceaccount.com"
+}
+
+# Cloud Run valida que quien despliega pueda leer la imagen.
+resource "google_artifact_registry_repository_iam_member" "deployer_reader" {
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.ledger.repository_id
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.deployer.email}"
+}
