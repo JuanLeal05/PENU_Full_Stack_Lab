@@ -1,4 +1,4 @@
-"""Configuracion leida del entorno. En Azure los secretos llegan desde Key Vault."""
+"""Configuracion leida del entorno. En GCP los secretos llegan desde Secret Manager."""
 
 import os
 from dataclasses import dataclass

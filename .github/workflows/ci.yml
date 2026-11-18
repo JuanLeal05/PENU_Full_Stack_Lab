@@ -1,4 +1,4 @@
-# Corre en cada Pull Request y en cada push a main. No usa credenciales de Azure:
+# Corre en cada Pull Request y en cada push a main. No usa credenciales de GCP:
 # todo lo que valida se puede comprobar sin tocar la nube.
 name: ci
 
@@ -38,7 +38,7 @@ jobs:
         run: terraform fmt -check -recursive infra
       - name: Validar cada raiz
         run: |
-          for root in infra/bootstrap infra/environments/dev infra/environments/prod infra/environments/local; do
+          for root in infra/bootstrap infra/environments/dev infra/environments/prod; do
             terraform -chdir="$root" init -backend=false -input=false
             terraform -chdir="$root" validate
           done
@@ -61,6 +61,6 @@ jobs:
         run: uvx --python 3.12 --with pytest pytest cost/tests -q
       - name: Presupuesto con planes de ejemplo
         run: |
-          python3 cost/estimate.py --offline --budget 5 \
+          python3 cost/estimate.py --offline --budget 40 \
             --plan dev=cost/fixtures/dev-plan.json \
             --plan prod=cost/fixtures/prod-plan.json

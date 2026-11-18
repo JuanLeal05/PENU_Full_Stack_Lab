@@ -1,4 +1,4 @@
-"""Prueba de concurrencia contra el ambiente desplegado (Azure SQL real)."""
+"""Prueba de concurrencia contra el ambiente desplegado (Cloud SQL real)."""
 import collections
 import json
 import secrets

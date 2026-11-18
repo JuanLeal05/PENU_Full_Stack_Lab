@@ -1,34 +1,34 @@
-# Se ejecuta una sola vez desde tu equipo, con `az login`. Crea lo que GitHub Actions necesita antes de
-# poder desplegar: el estado remoto de dev y prod, y una identidad administrada que entra con OIDC.
-# Su propio estado queda local.
+# Se ejecuta una sola vez desde tu equipo, con el token de gcloud. Crea lo que GitHub Actions necesita
+# antes de poder desplegar: el bucket de estado, el repositorio de imagenes y dos identidades que
+# entran con Workload Identity Federation (OIDC). Su propio estado queda local.
+#   export GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"
 
 terraform {
   required_version = ">= 1.11"
   required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 5.0"
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.0"
     }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
-    time = {
-      source  = "hashicorp/time"
-      version = "~> 0.12"
-    }
   }
 }
 
-provider "azurerm" {
-  use_cli                         = true
-  storage_use_azuread             = true
-  resource_provider_registrations = "none"
-  features {}
+provider "google" {
+  project = var.project_id
+  region  = var.region
 }
 
-variable "location" {
-  description = "Region permitida por la politica de tu suscripcion."
+variable "project_id" {
+  description = "Proyecto de GCP donde viven los dos ambientes."
+  type        = string
+}
+
+variable "region" {
+  description = "Region de la aplicacion, la base y el repositorio de imagenes."
   type        = string
 }
 
@@ -44,8 +44,8 @@ variable "github_repository" {
 
 variable "github_repository_ids" {
   description = <<-EOT
-    Repositorio con sus ID numericos, como usuario@123/repositorio@456. Los repositorios creados desde
-    mediados de 2026 firman el token OIDC con este formato. Obtengalo con:
+    Repositorio con sus ID numericos, como usuario@123/repositorio@456. Los repositorios nuevos firman
+    el token OIDC con este formato. Obtengalo con:
     gh api repos/usuario/repositorio --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"'
   EOT
   type        = string
@@ -57,7 +57,9 @@ variable "github_repository_ids" {
   }
 }
 
-data "azurerm_client_config" "current" {}
+data "google_project" "this" {
+  project_id = var.project_id
+}
 
 resource "random_string" "suffix" {
   length  = 8
@@ -65,154 +67,196 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
-resource "azurerm_resource_group" "state" {
-  name     = "rg-ledger-tfstate"
-  location = var.location
-  tags     = { project = "eci-ledger-lab", managed_by = "terraform" }
+locals {
+  labels = { project = "eci-ledger-lab", managed_by = "terraform" }
+  member = "serviceAccount"
 }
 
-resource "azurerm_storage_account" "state" {
-  #checkov:skip=CKV_AZURE_33:No se usa el servicio de colas en esta cuenta
-  #checkov:skip=CKV_AZURE_59:Terraform corre desde tu equipo; el acceso exige Entra ID y claves desactivadas
-  #checkov:skip=CKV_AZURE_206:LRS basta: el estado se versiona y puede reconstruirse en un laboratorio
-  #checkov:skip=CKV2_AZURE_33:Un private endpoint cuesta cerca de 7 USD al mes y exige una VNet
-  #checkov:skip=CKV2_AZURE_1:La llave administrada por Microsoft basta; CMK exige mas infraestructura
-  name                            = "stledger${random_string.suffix.result}"
-  resource_group_name             = azurerm_resource_group.state.name
-  location                        = azurerm_resource_group.state.location
-  account_tier                    = "Standard"
-  account_replication_type        = "LRS"
-  min_tls_version                 = "TLS1_2"
-  allow_nested_items_to_be_public = false
-  shared_access_key_enabled       = false # Solo Entra ID: el estado contiene secretos.
-  default_to_oauth_authentication = true
-  tags                            = azurerm_resource_group.state.tags
+# Estado remoto: un archivo por ambiente, versionado, sin acceso publico y sin claves.
+resource "google_storage_bucket" "state" {
+  #checkov:skip=CKV_GCP_62:Los logs de acceso al bucket generan almacenamiento adicional con costo
+  #checkov:skip=CKV_GCP_78:El versionado esta activo; este control exige ademas una regla de ciclo de vida que no aplica
+  name                        = "tfstate-ledger-${random_string.suffix.result}"
+  project                     = var.project_id
+  location                    = upper(var.region)
+  force_destroy               = true
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  labels                      = local.labels
 
-  blob_properties {
-    versioning_enabled = true
-    delete_retention_policy {
-      days = 7
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      num_newer_versions = 5
     }
-    container_delete_retention_policy {
-      days = 7
+    action {
+      type = "Delete"
     }
   }
 }
 
-resource "azurerm_role_assignment" "state_owner" {
-  scope                = azurerm_storage_account.state.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = data.azurerm_client_config.current.object_id
+# Repositorio de imagenes: la imagen se identifica por su digest y las dos identidades solo escriben/leen aqui.
+resource "google_artifact_registry_repository" "ledger" {
+  #checkov:skip=CKV_GCP_84:Claves administradas por Google; CMEK exige Cloud KMS, que tiene costo
+  project       = var.project_id
+  location      = var.region
+  repository_id = "ledger"
+  format        = "DOCKER"
+  description   = "Imagenes de Ledger"
+  labels        = local.labels
 }
 
-resource "time_sleep" "rbac_propagation" {
-  depends_on      = [azurerm_role_assignment.state_owner]
-  create_duration = "90s"
+# Identidad que publica la imagen: solo puede escribir en el repositorio.
+resource "google_service_account" "publisher" {
+  project      = var.project_id
+  account_id   = "sa-ledger-publisher"
+  display_name = "GitHub Actions: publicar imagen"
 }
 
-resource "azurerm_storage_container" "state" {
-  #checkov:skip=CKV2_AZURE_21:Los logs de diagnostico del blob se cobran; el acceso ya exige Entra ID
-  name                  = "tfstate"
-  storage_account_id    = azurerm_storage_account.state.id
-  container_access_type = "private"
-  depends_on            = [time_sleep.rbac_propagation]
+# Identidad que despliega: Terraform crea los recursos de cada ambiente.
+resource "google_service_account" "deployer" {
+  project      = var.project_id
+  account_id   = "sa-ledger-deployer"
+  display_name = "GitHub Actions: desplegar ambientes"
 }
 
-# Identidad de GitHub Actions. No es un service principal con secreto: no hay contrasena que guardar.
-resource "azurerm_user_assigned_identity" "github" {
-  name                = "id-ledger-github"
-  resource_group_name = azurerm_resource_group.state.name
-  location            = azurerm_resource_group.state.location
-  tags                = azurerm_resource_group.state.tags
+# Workload Identity Federation: no hay llave JSON ni secreto. GitHub firma un token OIDC y GCP lo
+# acepta solo si viene de este repositorio.
+resource "google_iam_workload_identity_pool" "github" {
+  project                   = var.project_id
+  workload_identity_pool_id = "ledger-github-pool"
+  display_name              = "GitHub Actions"
 }
 
-# Azure solo acepta tokens de este repositorio y de estos dos GitHub Environments. Se registran los
-# dos formatos de subject: con nombres (repositorios anteriores) y con ID numericos (los nuevos).
+resource "google_iam_workload_identity_pool_provider" "github" {
+  #checkov:skip=CKV_GCP_125:La condicion ya fija propietario y repositorio; ademas cada identidad solo acepta subjects de dev/prod o de main
+  project                            = var.project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub OIDC"
+
+  attribute_mapping = {
+    "google.subject"             = "assertion.sub"
+    "attribute.repository"       = "assertion.repository"
+    "attribute.repository_owner" = "assertion.repository_owner"
+  }
+  # Ningun otro repositorio puede intercambiar su token, aunque conozca los identificadores.
+  attribute_condition = "assertion.repository_owner == \"${split("/", var.github_repository)[0]}\" && assertion.repository == \"${var.github_repository}\""
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+# Subjects permitidos. Con nombres (repositorios anteriores) y con ID numericos (los nuevos).
 locals {
-  github_subjects = merge(
-    { for environment in ["dev", "prod"] : "github-${environment}" => "repo:${var.github_repository}:environment:${environment}" },
-    var.github_repository_ids == null ? {} : {
-      for environment in ["dev", "prod"] : "github-${environment}-ids" => "repo:${var.github_repository_ids}:environment:${environment}"
-    },
-  )
+  repo_prefixes = compact([var.github_repository, var.github_repository_ids])
+
+  deploy_subjects = flatten([
+    for prefix in local.repo_prefixes : [for environment in ["dev", "prod"] : "repo:${prefix}:environment:${environment}"]
+  ])
+  publish_subjects = [for prefix in local.repo_prefixes : "repo:${prefix}:ref:refs/heads/main"]
+
+  pool = google_iam_workload_identity_pool.github.name
 }
 
-resource "azurerm_federated_identity_credential" "github" {
-  for_each = local.github_subjects
+resource "google_service_account_iam_member" "deployer_wif" {
+  for_each = toset(local.deploy_subjects)
 
-  name                      = each.key
-  user_assigned_identity_id = azurerm_user_assigned_identity.github.id
-  audience                  = ["api://AzureADTokenExchange"]
-  issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = each.value
+  service_account_id = google_service_account.deployer.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://iam.googleapis.com/${local.pool}/subject/${each.value}"
 }
 
-locals {
-  subscription_scope = "/subscriptions/${data.azurerm_client_config.current.subscription_id}"
+resource "google_service_account_iam_member" "publisher_wif" {
+  for_each = toset(local.publish_subjects)
 
-  # Key Vault Secrets Officer y Key Vault Secrets User: los unicos roles que el pipeline puede asignar.
-  assignable_roles = "b86a8fe4-44ce-4948-aee5-eccb2c155cd7, 4633458b-17de-408a-b874-0445c86b69e6"
+  service_account_id = google_service_account.publisher.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://iam.googleapis.com/${local.pool}/subject/${each.value}"
 }
 
-# Terraform crea grupos de recursos, asi que el alcance debe ser la suscripcion.
-resource "azurerm_role_assignment" "github_contributor" {
-  scope                = local.subscription_scope
-  role_definition_name = "Contributor"
-  principal_id         = azurerm_user_assigned_identity.github.principal_id
-  principal_type       = "ServicePrincipal"
+resource "google_artifact_registry_repository_iam_member" "publisher" {
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.ledger.repository_id
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.publisher.email}"
 }
 
-# Contributor no puede asignar roles. Este permiso lo habilita, limitado por la condicion a los
-# dos roles de Key Vault: el pipeline no puede otorgarse Owner a si mismo.
-resource "azurerm_role_assignment" "github_rbac_admin" {
-  scope                = local.subscription_scope
-  role_definition_name = "Role Based Access Control Administrator"
-  principal_id         = azurerm_user_assigned_identity.github.principal_id
-  principal_type       = "ServicePrincipal"
-  condition_version    = "2.0"
-  condition            = <<-EOT
-    (
-      (!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}))
-      OR
-      (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${local.assignable_roles}})
-    )
-    AND
-    (
-      (!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'}))
-      OR
-      (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${local.assignable_roles}})
-    )
-  EOT
+resource "google_storage_bucket_iam_member" "deployer_state" {
+  bucket = google_storage_bucket.state.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.deployer.email}"
 }
 
-resource "azurerm_role_assignment" "github_state" {
-  scope                = azurerm_storage_account.state.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_user_assigned_identity.github.principal_id
-  principal_type       = "ServicePrincipal"
+# Roles amplios del desplegador, a nivel de proyecto porque Terraform crea servicios, bases y secretos.
+resource "google_project_iam_member" "deployer" {
+  #checkov:skip=CKV_GCP_41:iam.serviceAccountUser es necesario para que Cloud Run ejecute con la cuenta de la app
+  #checkov:skip=CKV_GCP_49:serviceAccountAdmin se usa solo para crear la cuenta de cada app
+  for_each = toset([
+    "roles/run.admin",
+    "roles/cloudsql.admin",
+    "roles/secretmanager.admin",
+    "roles/iam.serviceAccountAdmin",
+    "roles/iam.serviceAccountUser",
+    "roles/logging.configWriter",
+    "roles/serviceusage.serviceUsageConsumer",
+  ])
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.deployer.email}"
 }
 
-output "azure_client_id" {
-  description = "Identifica la identidad. No es un secreto."
-  value       = azurerm_user_assigned_identity.github.client_id
+# Los roles anteriores no pueden asignar roles de proyecto. Este permiso lo habilita, limitado por la
+# condicion a dos roles: el pipeline no puede otorgarse Owner a si mismo.
+resource "google_project_iam_member" "deployer_iam_admin" {
+  project = var.project_id
+  role    = "roles/resourcemanager.projectIamAdmin"
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+
+  condition {
+    title       = "solo-roles-de-la-app"
+    description = "Solo puede otorgar o quitar cloudsql.client y secretmanager.secretAccessor"
+    expression  = <<-EOT
+      api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly([
+        'roles/cloudsql.client',
+        'roles/secretmanager.secretAccessor'
+      ])
+    EOT
+  }
 }
 
-output "azure_tenant_id" {
-  value = data.azurerm_client_config.current.tenant_id
+output "workload_identity_provider" {
+  description = "Recurso del proveedor OIDC. No es un secreto."
+  value       = google_iam_workload_identity_pool_provider.github.name
 }
 
-output "azure_subscription_id" {
-  value = data.azurerm_client_config.current.subscription_id
+output "deployer_service_account" {
+  value = google_service_account.deployer.email
 }
 
-output "resource_group_name" {
-  value = azurerm_resource_group.state.name
+output "publisher_service_account" {
+  value = google_service_account.publisher.email
 }
 
-output "storage_account_name" {
-  value = azurerm_storage_account.state.name
+output "project_id" {
+  value = var.project_id
 }
 
-output "container_name" {
-  value = azurerm_storage_container.state.name
+output "region" {
+  value = var.region
+}
+
+output "state_bucket" {
+  value = google_storage_bucket.state.name
+}
+
+output "registry" {
+  description = "Ruta base de las imagenes."
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ledger.repository_id}"
 }

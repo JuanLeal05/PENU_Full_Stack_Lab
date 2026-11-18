@@ -25,14 +25,13 @@ jobs:
       run:
         # Activa pipefail: sin esto, "estimate.py | tee" ocultaria el fallo del control de costos.
         shell: bash
+    permissions:
+      contents: read
+      id-token: write
     env:
-      ARM_USE_OIDC: "true"
-      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: "true"
-      TF_VAR_location: ${{ vars.AZURE_LOCATION }}
-      TF_VAR_database_location: ${{ vars.AZURE_DB_LOCATION }}
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.GCP_REGION }}
       TF_VAR_image: ${{ inputs.image }}
       ROOT: infra/environments/${{ inputs.environment }}
     steps:
@@ -40,17 +39,14 @@ jobs:
       - name: Validar configuración
         env:
           VALUES: >-
-            AZURE_CLIENT_ID=${{ vars.AZURE_CLIENT_ID }}
-            AZURE_TENANT_ID=${{ vars.AZURE_TENANT_ID }}
-            AZURE_SUBSCRIPTION_ID=${{ vars.AZURE_SUBSCRIPTION_ID }}
-            AZURE_LOCATION=${{ vars.AZURE_LOCATION }}
-            AZURE_DB_LOCATION=${{ vars.AZURE_DB_LOCATION }}
-            TF_STATE_RESOURCE_GROUP=${{ vars.TF_STATE_RESOURCE_GROUP }}
-            TF_STATE_STORAGE_ACCOUNT=${{ vars.TF_STATE_STORAGE_ACCOUNT }}
-            TF_STATE_CONTAINER=${{ vars.TF_STATE_CONTAINER }}
+            GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}
+            GCP_REGION=${{ vars.GCP_REGION }}
+            GCP_WIF_PROVIDER=${{ vars.GCP_WIF_PROVIDER }}
+            GCP_DEPLOYER_SA=${{ vars.GCP_DEPLOYER_SA }}
+            TF_STATE_BUCKET=${{ vars.TF_STATE_BUCKET }}
             COST_BUDGET_USD=${{ vars.COST_BUDGET_USD }}
         run: |
-          # Falla antes de tocar Azure si una variable falta o quedo con un texto de ejemplo.
+          # Falla antes de tocar GCP si una variable falta o quedo con un texto de ejemplo.
           failed=0
           for pair in $VALUES; do
             value="${pair#*=}"
@@ -60,22 +56,23 @@ jobs:
             fi
           done
           exit "$failed"
+      # Entra a GCP con Workload Identity Federation: no hay llave JSON ni secreto guardado.
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.17.1
           terraform_wrapper: false
       - name: Terraform init
         env:
-          STATE_KEY: ledger-${{ inputs.environment }}.tfstate
-          STATE_RG: ${{ vars.TF_STATE_RESOURCE_GROUP }}
-          STATE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
-          STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          STATE_PREFIX: ledger-${{ inputs.environment }}
         run: |
           terraform -chdir="$ROOT" init -input=false \
-            -backend-config="resource_group_name=$STATE_RG" \
-            -backend-config="storage_account_name=$STATE_ACCOUNT" \
-            -backend-config="container_name=$STATE_CONTAINER" \
-            -backend-config="key=$STATE_KEY"
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="prefix=$STATE_PREFIX"
       - name: Terraform plan
         run: terraform -chdir="$ROOT" plan -input=false -out=deploy.tfplan
       - name: Control de costos

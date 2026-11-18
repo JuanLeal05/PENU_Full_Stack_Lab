@@ -17,7 +17,7 @@ request() {
     -H 'Content-Type: application/json' "$@"
 }
 
-echo "Esperando la app (arranque en frio y reanudacion de la base)..."
+echo "Esperando la app (arranque en frio y conexion a Cloud SQL)..."
 for attempt in {1..20}; do
   curl --silent --fail --max-time 60 "$BASE/readyz" >/dev/null && break
   [[ "$attempt" == 20 ]] && die "la app no quedo lista en $BASE"

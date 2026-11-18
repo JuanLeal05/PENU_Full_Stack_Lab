@@ -10,20 +10,21 @@ sys.path.insert(0, str(HERE.parent))
 import estimate as cost  # noqa: E402
 
 PRICES = {
-    "aca_vcpu_second": 0.000024,
-    "aca_gib_second": 0.000003,
-    "aca_million_requests": 0.4,
-    "sql_vcore_hour": 0.5,
-    "sql_gb_month": 0.1,
-    "kv_10k_operations": 0.03,
-    "log_gb_ingested": 2.3,
-    "blob_gb_month": 0.02,
-    "blob_10k_writes": 0.05,
+    "run_vcpu_second": 0.000024,
+    "run_gib_second": 0.0000025,
+    "run_million_requests": 0.4,
+    "sql_micro_hour": 0.015,
+    "sql_hdd_gb_month": 0.09,
+    "secret_version_month": 0.06,
+    "secret_10k_access": 0.03,
+    "gcs_gb_month": 0.02,
+    "gcs_10k_class_a": 0.05,
 }
+REGION = "us-central1"
 
 
 def book():
-    return cost.PriceBook({"eastus": PRICES}, offline=True)
+    return cost.PriceBook({REGION: PRICES}, offline=True)
 
 
 def usage(**overrides):
@@ -32,27 +33,24 @@ def usage(**overrides):
     return base
 
 
-def app(cpu=0.25, memory="0.5Gi"):
+def app(cpu="1", memory="512Mi"):
     return {
-        "address": "module.stack.module.app.azurerm_container_app.this",
+        "address": "module.stack.module.app.google_cloud_run_v2_service.this",
         "mode": "managed",
-        "type": "azurerm_container_app",
-        "values": {"template": [{"container": [{"cpu": cpu, "memory": memory}]}]},
+        "type": "google_cloud_run_v2_service",
+        "values": {
+            "location": REGION,
+            "template": [{"containers": [{"resources": [{"limits": {"cpu": cpu, "memory": memory}}]}]}],
+        },
     }
 
 
-def database(free=True, behavior="AutoPause"):
+def database():
     return {
-        "address": "module.stack.module.database.azapi_resource.free[0]",
+        "address": "module.stack.module.database.google_sql_database_instance.this",
         "mode": "managed",
-        "type": "azapi_resource",
-        "values": {
-            "location": "eastus",
-            "type": "Microsoft.Sql/servers/databases@2023-08-01",
-            "body": {"properties": {
-                "useFreeLimit": free, "freeLimitExhaustionBehavior": behavior,
-            }},
-        },
+        "type": "google_sql_database_instance",
+        "values": {"region": REGION, "settings": [{"tier": "db-f1-micro"}]},
     }
 
 
@@ -75,12 +73,12 @@ def test_usage_over_grant_is_billed():
     lines, _ = cost.estimate(
         {"dev": plan(app())}, usage(app_active_hours_per_month=hours), book()
     )
-    # 3.6M segundos x 0.25 vCPU - 180k gratis = 720k; x 0.5 GiB - 360k gratis = 1.44M.
-    assert total(lines) == pytest.approx(720_000 * 0.000024 + 1_440_000 * 0.000003)
+    # 3.6M segundos x 1 vCPU - 180k gratis; x 0.5 GiB - 360k gratis.
+    assert total(lines) == pytest.approx(3_420_000 * 0.000024 + 1_440_000 * 0.0000025)
 
 
 def test_grant_is_shared_between_environments():
-    hours = {"dev": 150, "prod": 150}
+    hours = {"dev": 40, "prod": 40}
     alone, _ = cost.estimate(
         {"dev": plan(app())}, usage(app_active_hours_per_month=hours), book()
     )
@@ -92,26 +90,20 @@ def test_grant_is_shared_between_environments():
     assert total(both) > 0
 
 
-def test_free_sql_with_autopause_costs_zero():
+def test_cloud_sql_always_bills_because_it_has_no_free_tier():
     lines, _ = cost.estimate({"dev": plan(database())}, usage(), book())
-    assert total(lines) == 0
-
-
-@pytest.mark.parametrize("kwargs", [{"free": False}, {"behavior": "BillOverUsage"}])
-def test_sql_that_can_bill_is_not_reported_as_free(kwargs):
-    lines, _ = cost.estimate({"dev": plan(database(**kwargs))}, usage(), book())
-    assert total(lines) == pytest.approx(10 * 0.5 + 1 * 0.1)
+    assert total(lines) == pytest.approx(730 * 0.015 + 10 * 0.09)
 
 
 def test_unknown_resource_is_reported():
-    vm = {"address": "azurerm_linux_virtual_machine.x", "mode": "managed",
-          "type": "azurerm_linux_virtual_machine", "values": {}}
+    vm = {"address": "google_compute_instance.x", "mode": "managed",
+          "type": "google_compute_instance", "values": {}}
     _, unknown = cost.estimate({"dev": plan(vm)}, usage(), book())
-    assert unknown == ["dev: azurerm_linux_virtual_machine.x"]
+    assert unknown == ["dev: google_compute_instance.x"]
 
 
 def test_data_sources_and_helpers_are_ignored():
-    data = {"address": "data.x", "mode": "data", "type": "azurerm_client_config", "values": {}}
+    data = {"address": "data.x", "mode": "data", "type": "google_project", "values": {}}
     helper = {"address": "random_string.s", "mode": "managed", "type": "random_string", "values": {}}
     lines, unknown = cost.estimate({"dev": plan(data, helper)}, usage(), book())
     assert lines == [] and unknown == []
@@ -121,35 +113,35 @@ def test_network_failure_falls_back_to_snapshot():
     def broken(_key, _region):
         raise OSError("sin red")
 
-    prices = cost.PriceBook({"eastus": PRICES}, fetcher=broken)
-    assert prices.price("kv_10k_operations", "eastus") == 0.03
+    prices = cost.PriceBook({REGION: PRICES}, fetcher=broken)
+    assert prices.price("secret_10k_access", REGION) == 0.03
     assert prices.used_snapshot
 
 
 def test_missing_price_is_an_error_not_zero():
     with pytest.raises(cost.PriceNotFound):
-        cost.PriceBook({}, offline=True).price("kv_10k_operations", "eastus")
+        cost.PriceBook({}, offline=True).price("secret_10k_access", REGION)
 
 
 def run_cli(tmp_path, resources, *extra):
     path = tmp_path / "plan.json"
     path.write_text(json.dumps(plan(*resources)))
     snapshot = tmp_path / "prices.json"
-    snapshot.write_text(json.dumps({"eastus": PRICES}))
+    snapshot.write_text(json.dumps({REGION: PRICES}))
     return cost.main([
         "--plan", f"dev={path}", "--snapshot", str(snapshot), "--offline", *extra,
     ])
 
 
 def test_budget_gate_fails_when_exceeded(tmp_path):
-    assert run_cli(tmp_path, [database(free=False)], "--budget", "1") == 1
+    assert run_cli(tmp_path, [database()], "--budget", "1") == 1
 
 
 def test_budget_gate_passes_within_limit(tmp_path):
-    assert run_cli(tmp_path, [database()], "--budget", "1") == 0
+    assert run_cli(tmp_path, [database()], "--budget", "20") == 0
 
 
 def test_unknown_resource_fails_the_gate(tmp_path):
-    vm = {"address": "azurerm_linux_virtual_machine.x", "mode": "managed",
-          "type": "azurerm_linux_virtual_machine", "values": {}}
+    vm = {"address": "google_compute_instance.x", "mode": "managed",
+          "type": "google_compute_instance", "values": {}}
     assert run_cli(tmp_path, [vm]) == 1

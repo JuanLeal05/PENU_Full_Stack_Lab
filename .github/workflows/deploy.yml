@@ -22,20 +22,20 @@ jobs:
     steps:
       - id: ref
         env:
-          OWNER: ${{ github.repository_owner }}
+          REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ledger
           DIGEST: ${{ inputs.digest }}
         run: |
           if ! [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
             echo "::error::El digest debe tener el formato sha256:<64 caracteres hexadecimales>"
             exit 1
           fi
-          echo "ref=ghcr.io/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/ledger@$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "ref=$REGISTRY/ledger@$DIGEST" >> "$GITHUB_OUTPUT"
 
   dev:
     needs: image
     permissions:
       contents: read
-      id-token: write # Permite pedir a GitHub el token OIDC que Azure intercambia por acceso.
+      id-token: write # Permite pedir a GitHub el token OIDC que GCP intercambia por acceso.
     uses: ./.github/workflows/deploy-env.yml
     with:
       environment: dev

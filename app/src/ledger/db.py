@@ -1,4 +1,4 @@
-"""Conexion a la base de datos, incluida la espera a Azure SQL serverless cuando esta en pausa."""
+"""Conexion a la base de datos, incluida la espera a Cloud SQL cuando esta arrancando."""
 
 import logging
 import time
@@ -21,12 +21,12 @@ def build_engine(database_url: str) -> Engine:
             connection.execute("PRAGMA foreign_keys=ON")
 
         return engine
-    # pool_pre_ping detecta conexiones cortadas por la pausa automatica de la base.
+    # pool_pre_ping detecta conexiones cortadas por reinicios o mantenimiento de la base.
     return create_engine(database_url, pool_pre_ping=True, pool_recycle=1800, pool_size=3)
 
 
 def wait_for_database(engine: Engine, attempts: int = 10, delay_seconds: float = 6.0) -> None:
-    """La primera conexion a una base en pausa falla mientras esta se reanuda (error 40613)."""
+    """La primera conexion puede fallar mientras la instancia termina de arrancar."""
     for attempt in range(1, attempts + 1):
         try:
             with engine.connect() as connection:

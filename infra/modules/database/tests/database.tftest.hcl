@@ -1,81 +1,63 @@
-mock_provider "azurerm" {
-  mock_resource "azurerm_mssql_server" {
+mock_provider "google" {
+  mock_resource "google_sql_database_instance" {
     defaults = {
-      id                          = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.Sql/servers/sql"
-      fully_qualified_domain_name = "sql.database.windows.net"
-    }
-  }
-  mock_resource "azurerm_mssql_database" {
-    defaults = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.Sql/servers/sql/databases/ledger"
+      connection_name = "proyecto:us-central1:sql-prueba"
+      name            = "sql-prueba"
     }
   }
 }
-
-mock_provider "azapi" {
-  mock_resource "azapi_resource" {
-    defaults = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.Sql/servers/sql/databases/ledger"
-    }
-  }
-}
-
 mock_provider "random" {}
 
 variables {
-  server_name         = "sql-prueba"
-  resource_group_name = "rg"
-  location            = "eastus"
+  instance_name = "sql-prueba"
+  project_id    = "proyecto"
+  region        = "us-central1"
 }
 
-run "por_defecto_usa_la_oferta_gratuita" {
+run "usa_postgres_pequeno_y_tls_obligatorio" {
   command = apply
 
   assert {
-    condition     = length(azapi_resource.free) == 1 && length(azurerm_mssql_database.paid) == 0
-    error_message = "Debe crearse solo la base gratuita."
+    condition     = google_sql_database_instance.this.database_version == "POSTGRES_15"
+    error_message = "La base debe ser PostgreSQL 15."
   }
   assert {
-    condition     = azapi_resource.free[0].body.properties.useFreeLimit == true
-    error_message = "useFreeLimit debe estar activo."
+    condition     = google_sql_database_instance.this.settings[0].tier == "db-f1-micro"
+    error_message = "Por defecto debe usarse la maquina mas barata."
   }
   assert {
-    condition     = azapi_resource.free[0].body.properties.freeLimitExhaustionBehavior == "AutoPause"
-    error_message = "Al agotar el limite gratis la base debe pausarse, nunca cobrar."
+    condition     = google_sql_database_instance.this.settings[0].ip_configuration[0].ssl_mode == "ENCRYPTED_ONLY"
+    error_message = "La instancia debe exigir TLS."
   }
   assert {
-    condition     = keys(azapi_resource.free[0].body.properties) == ["freeLimitExhaustionBehavior", "useFreeLimit"]
-    error_message = "Azure rechaza valores propios de tamano o pausa en la oferta gratuita con AutoPause."
+    condition     = length(google_sql_database_instance.this.settings[0].ip_configuration[0].authorized_networks) == 0
+    error_message = "No debe haber redes autorizadas: solo entra el conector de Cloud SQL."
   }
   assert {
-    condition     = strcontains(nonsensitive(output.database_url), "Encrypt=yes&TrustServerCertificate=no")
-    error_message = "La conexion debe exigir TLS y validar el certificado."
-  }
-  assert {
-    condition     = azurerm_mssql_server.this.minimum_tls_version == "1.2"
-    error_message = "El servidor debe exigir TLS 1.2."
+    condition     = strcontains(nonsensitive(output.database_url), "host=/cloudsql/proyecto:us-central1:sql-prueba")
+    error_message = "La URL debe conectar por el socket del conector de Cloud SQL."
   }
 }
 
-run "sin_oferta_gratuita_usa_azurerm" {
+run "las_copias_son_opcionales" {
   command = apply
 
   variables {
-    use_free_offer = false
+    backups_enabled = true
   }
 
   assert {
-    condition     = length(azapi_resource.free) == 0 && length(azurerm_mssql_database.paid) == 1
-    error_message = "Debe crearse solo la base de pago."
+    condition     = google_sql_database_instance.this.settings[0].backup_configuration[0].enabled
+    error_message = "Las copias deben activarse con backups_enabled."
   }
 }
 
-run "la_pausa_minima_se_valida" {
+run "solo_se_permiten_maquinas_baratas" {
   command = plan
 
   variables {
-    auto_pause_delay_minutes = 5
+    tier = "db-n1-standard-8"
   }
 
-  expect_failures = [var.auto_pause_delay_minutes]
+  expect_failures = [var.tier]
 }

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ledger · Billetera transaccional en Azure</title>
-<meta name="description" content="Aplicación de laboratorio: transferencias ACID sobre Azure SQL, desplegadas con Terraform y GitHub Actions.">
+<title>Ledger · Billetera transaccional en GCP</title>
+<meta name="description" content="Aplicación de laboratorio: transferencias ACID sobre Cloud SQL, desplegadas con Terraform y GitHub Actions.">
 <style>
   :root {
     --navy: #071a3d;
@@ -161,12 +161,12 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <p class="eyebrow">PEMU 2026 · Laboratorio de aplicación transaccional en Azure</p>
+        <p class="eyebrow">PEMU 2026 · Laboratorio de aplicación transaccional en GCP</p>
         <h1>Una billetera donde el dinero nunca se pierde ni se duplica</h1>
         <p class="lead">Ledger es una aplicación de práctica para aprender cómo se construye y se despliega un sistema transaccional en la nube. Cree una cuenta, envíe dinero ficticio a otra persona y compruebe qué garantiza la base de datos.</p>
         <ul class="tags" aria-label="Tecnologías">
-          <li>Azure Container Apps</li>
-          <li>Azure SQL</li>
+          <li>Cloud Run</li>
+          <li>Cloud SQL</li>
           <li>Key Vault</li>
           <li>Terraform</li>
           <li>GitHub Actions</li>
@@ -274,14 +274,14 @@
   <section class="band" id="plataforma">
     <div class="wrap">
       <h2 class="title">La plataforma que la ejecuta</h2>
-      <p class="sub">Toda la infraestructura se define con Terraform y se despliega por ambientes desde GitHub Actions, sin service principal ni secretos de Azure en el repositorio.</p>
+      <p class="sub">Toda la infraestructura se define con Terraform y se despliega por ambientes desde GitHub Actions, sin service principal ni llaves de GCP en el repositorio.</p>
       <div class="table-scroll">
         <table class="stack">
           <thead><tr><th scope="col">Pieza</th><th scope="col">Servicio</th><th scope="col">Para qué sirve</th></tr></thead>
           <tbody>
-            <tr><td>Aplicación</td><td>Azure Container Apps</td><td>Ejecuta el contenedor y escala a cero sin tráfico.</td></tr>
-            <tr><td>Datos</td><td>Azure SQL Database</td><td>Garantiza las transacciones, con la oferta gratuita.</td></tr>
-            <tr><td>Secretos</td><td>Azure Key Vault</td><td>Guarda la conexión y la clave JWT, que la app lee con su identidad administrada.</td></tr>
+            <tr><td>Aplicación</td><td>Cloud Run</td><td>Ejecuta el contenedor y escala a cero sin tráfico.</td></tr>
+            <tr><td>Datos</td><td>Cloud SQL (PostgreSQL)</td><td>Garantiza las transacciones.</td></tr>
+            <tr><td>Secretos</td><td>Secret Manager</td><td>Guarda la conexión y la clave JWT, que la app lee con su cuenta de servicio.</td></tr>
             <tr><td>Imagen</td><td>GitHub Container Registry</td><td>Publica la imagen; dev y prod ejecutan el mismo digest.</td></tr>
             <tr><td>Despliegue</td><td>GitHub Actions y Terraform</td><td>Prueba, revisa seguridad y costos, y despliega con OIDC.</td></tr>
           </tbody>

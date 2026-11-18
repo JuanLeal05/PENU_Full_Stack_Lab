@@ -3,28 +3,28 @@ variable "name" {
   type        = string
 }
 
-variable "resource_group_name" {
-  description = "Grupo de recursos."
+variable "project_id" {
+  description = "Proyecto de GCP."
   type        = string
 }
 
-variable "location" {
-  description = "Region de Azure."
+variable "region" {
+  description = "Region de Cloud Run."
   type        = string
 }
 
 variable "image" {
-  description = "Imagen del contenedor."
+  description = "Imagen del contenedor en Artifact Registry."
   type        = string
 }
 
-variable "key_vault_id" {
-  description = "Key Vault del que la app lee secretos."
+variable "sql_connection_name" {
+  description = "proyecto:region:instancia de Cloud SQL."
   type        = string
 }
 
 variable "secret_ids" {
-  description = "Debe incluir database-url y jwt-secret."
+  description = "Debe incluir database-url y jwt-secret (secret_id de Secret Manager)."
   type        = map(string)
 
   validation {
@@ -39,31 +39,25 @@ variable "environment_variables" {
   default     = {}
 }
 
-variable "min_replicas" {
+variable "min_instances" {
   description = "Con 0 la app escala a cero y no consume computo sin trafico."
   type        = number
   default     = 0
 }
 
-variable "max_replicas" {
-  description = "Tope de replicas; limita tambien el costo maximo."
+variable "max_instances" {
+  description = "Tope de instancias; limita tambien el costo maximo."
   type        = number
   default     = 1
 }
 
-variable "logs_enabled" {
-  description = "Crea un workspace de Log Analytics con tope diario."
-  type        = bool
-  default     = false
-}
-
-variable "rbac_propagation_wait" {
-  description = "Espera tras asignar el rol de lectura."
+variable "iam_propagation_wait" {
+  description = "Espera tras asignar los permisos de lectura."
   type        = string
-  default     = "90s"
+  default     = "30s"
 }
 
-variable "tags" {
+variable "labels" {
   description = "Etiquetas."
   type        = map(string)
   default     = {}

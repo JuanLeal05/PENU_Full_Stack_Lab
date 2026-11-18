@@ -67,7 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz() -> dict:
-        """Liveness: no toca la base para no impedir su pausa automatica (y su costo cero)."""
+        """Liveness: no toca la base, para que el arranque de la app no dependa de ella."""
         return {"status": "ok", "environment": app_settings.environment}
 
     @app.get("/readyz")

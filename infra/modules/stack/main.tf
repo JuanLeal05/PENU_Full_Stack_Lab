@@ -1,13 +1,9 @@
 terraform {
   required_version = ">= 1.11"
   required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 5.0"
-    }
-    azapi = {
-      source  = "Azure/azapi"
-      version = "~> 2.0"
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -22,16 +18,16 @@ terraform {
 
 locals {
   name = "ledger-${var.environment}"
-  tags = {
+  labels = {
     project     = "eci-ledger-lab"
     environment = var.environment
     managed_by  = "terraform"
   }
-  # Solo prod queda protegido contra purgas y con logs: dev debe poder borrarse sin residuos.
+  # Solo prod tiene copias de seguridad y metrica de errores: dev debe poder borrarse sin residuos.
   is_prod = var.environment == "prod"
 }
 
-# Los nombres de Key Vault y SQL son globales en todo Azure.
+# El nombre de una instancia de Cloud SQL eliminada no se puede reutilizar durante una semana.
 resource "random_string" "suffix" {
   length  = 6
   special = false
@@ -43,31 +39,23 @@ resource "random_password" "jwt" {
   special = false
 }
 
-resource "azurerm_resource_group" "this" {
-  name     = "rg-${local.name}"
-  location = var.location
-  tags     = local.tags
-}
-
 module "database" {
   source = "../database"
 
-  server_name         = "sql-${local.name}-${random_string.suffix.result}"
-  resource_group_name = azurerm_resource_group.this.name
-  location            = coalesce(var.database_location, azurerm_resource_group.this.location)
-  use_free_offer      = var.use_free_offer
-  tags                = local.tags
+  instance_name   = "sql-${local.name}-${random_string.suffix.result}"
+  project_id      = var.project_id
+  region          = var.region
+  backups_enabled = local.is_prod
+  labels          = local.labels
 }
 
-module "key_vault" {
-  source = "../key_vault"
+module "secrets" {
+  source = "../secret_manager"
 
-  name                     = "kv-${var.environment}-${random_string.suffix.result}"
-  resource_group_name      = azurerm_resource_group.this.name
-  location                 = azurerm_resource_group.this.location
-  purge_protection_enabled = local.is_prod
-  rbac_propagation_wait    = var.rbac_propagation_wait
-  tags                     = local.tags
+  project_id = var.project_id
+  region     = var.region
+  prefix     = local.name
+  labels     = local.labels
 
   secrets = {
     "database-url" = module.database.database_url
@@ -76,21 +64,34 @@ module "key_vault" {
 }
 
 module "app" {
-  source = "../container_app"
+  source = "../cloud_run"
 
-  name                  = local.name
-  resource_group_name   = azurerm_resource_group.this.name
-  location              = azurerm_resource_group.this.location
-  image                 = var.image
-  key_vault_id          = module.key_vault.id
-  secret_ids            = module.key_vault.secret_ids
-  max_replicas          = var.max_replicas
-  logs_enabled          = local.is_prod
-  rbac_propagation_wait = var.rbac_propagation_wait
-  tags                  = local.tags
+  name                 = local.name
+  project_id           = var.project_id
+  region               = var.region
+  image                = var.image
+  sql_connection_name  = module.database.connection_name
+  secret_ids           = module.secrets.secret_ids
+  max_instances        = var.max_instances
+  iam_propagation_wait = var.iam_propagation_wait
+  labels               = local.labels
 
   environment_variables = {
     APP_ENV     = var.environment
     JWT_MINUTES = tostring(var.jwt_minutes)
+  }
+}
+
+# Solo prod: metrica de respuestas 5xx, base para alertas. La retencion de logs de Cloud Run es gratuita.
+resource "google_logging_metric" "errors" {
+  count = local.is_prod ? 1 : 0
+
+  project = var.project_id
+  name    = "${local.name}-errores-5xx"
+  filter  = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${module.app.service_name}\" AND httpRequest.status>=500"
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
   }
 }

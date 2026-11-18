@@ -1,22 +1,21 @@
 variable "environment" {
-  description = "Ambiente: local, dev o prod."
+  description = "Ambiente: dev o prod."
   type        = string
 
   validation {
-    condition     = contains(["local", "dev", "prod"], var.environment)
-    error_message = "El ambiente debe ser local, dev o prod."
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "El ambiente debe ser dev o prod."
   }
 }
 
-variable "location" {
-  description = "Region permitida por la politica de tu suscripcion (ver scripts/check-regions.sh)."
+variable "project_id" {
+  description = "Proyecto de GCP."
   type        = string
 }
 
-variable "database_location" {
-  description = "Region de Azure SQL, si debe ser otra: SQL restringe regiones por suscripcion. Con null usa location."
+variable "region" {
+  description = "Region de la aplicacion y de la base (ver scripts/check-regions.sh)."
   type        = string
-  default     = null
 }
 
 variable "image" {
@@ -29,14 +28,14 @@ variable "image" {
   }
 }
 
-variable "max_replicas" {
-  description = "Tope de replicas."
+variable "max_instances" {
+  description = "Tope de instancias."
   type        = number
   default     = 1
 
   validation {
-    condition     = var.max_replicas >= 1 && var.max_replicas <= 3
-    error_message = "max_replicas debe estar entre 1 y 3 para proteger el credito."
+    condition     = var.max_instances >= 1 && var.max_instances <= 3
+    error_message = "max_instances debe estar entre 1 y 3 para proteger el credito."
   }
 }
 
@@ -46,14 +45,8 @@ variable "jwt_minutes" {
   default     = 30
 }
 
-variable "use_free_offer" {
-  description = "Usa la oferta gratuita de Azure SQL."
-  type        = bool
-  default     = true
-}
-
-variable "rbac_propagation_wait" {
-  description = "Espera tras cada asignacion de rol."
+variable "iam_propagation_wait" {
+  description = "Espera tras cada asignacion de permisos."
   type        = string
-  default     = "90s"
+  default     = "30s"
 }

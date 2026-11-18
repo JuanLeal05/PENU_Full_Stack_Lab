@@ -3,7 +3,12 @@ output "app_url" {
   value       = module.app.url
 }
 
-output "resource_group_name" {
-  description = "Grupo de recursos del ambiente."
-  value       = azurerm_resource_group.this.name
+output "service_name" {
+  description = "Servicio de Cloud Run del ambiente."
+  value       = module.app.service_name
+}
+
+output "sql_instance" {
+  description = "Instancia de Cloud SQL del ambiente."
+  value       = module.database.instance_name
 }

@@ -1,21 +1,21 @@
-output "database_id" {
-  description = "ID de la base de datos."
-  value       = local.database_id
+output "connection_name" {
+  description = "proyecto:region:instancia, usado por el conector de Cloud SQL de Cloud Run."
+  value       = google_sql_database_instance.this.connection_name
 }
 
-output "location" {
-  description = "Region del servidor."
-  value       = azurerm_mssql_server.this.location
+output "instance_name" {
+  description = "Nombre de la instancia."
+  value       = google_sql_database_instance.this.name
 }
 
 output "database_url" {
-  description = "URL de conexion SQLAlchemy con TLS obligatorio."
+  description = "URL SQLAlchemy por socket Unix del conector de Cloud SQL (el conector cifra el trafico)."
   sensitive   = true
   value = format(
-    "mssql+pyodbc://%s:%s@%s:1433/%s?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no&LoginTimeout=60",
+    "postgresql+psycopg2://%s:%s@/%s?host=/cloudsql/%s",
     var.admin_login,
     urlencode(random_password.admin.result),
-    azurerm_mssql_server.this.fully_qualified_domain_name,
     var.database_name,
+    google_sql_database_instance.this.connection_name,
   )
 }

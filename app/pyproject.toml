@@ -1,7 +1,7 @@
 [project]
 name = "ledger"
 version = "0.1.0"
-description = "Billetera transaccional del laboratorio de Azure"
+description = "Billetera transaccional del laboratorio de GCP"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi>=0.115",
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mssql = ["pyodbc>=5.1"]
+postgres = ["psycopg2-binary>=2.9"]
 dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 
 [build-system]

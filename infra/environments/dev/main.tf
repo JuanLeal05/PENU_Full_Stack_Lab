@@ -1,70 +1,54 @@
 terraform {
   required_version = ">= 1.11"
   required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 5.0"
-    }
-    azapi = {
-      source  = "Azure/azapi"
-      version = "~> 2.0"
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.0"
     }
   }
 
-  # La cuenta y la clave se pasan con -backend-config; ver .github/workflows/deploy-env.yml.
-  backend "azurerm" {
-    use_azuread_auth = true
-  }
+  # El bucket y el prefijo se pasan con -backend-config; ver .github/workflows/deploy-env.yml.
+  backend "gcs" {}
 }
 
-# En GitHub Actions la identidad llega por OIDC (ARM_USE_OIDC y ARM_CLIENT_ID); en tu equipo, de `az login`.
-provider "azurerm" {
-  storage_use_azuread             = true
-  resource_provider_registrations = "none"
-
-  features {
-    key_vault {
-      purge_soft_delete_on_destroy = true
-    }
-  }
+# En GitHub Actions la identidad llega por Workload Identity Federation (credencial externa);
+# en tu equipo, del token de gcloud.
+provider "google" {
+  project = var.project_id
+  region  = var.region
 }
 
-provider "azapi" {}
-
-variable "location" {
+variable "project_id" {
   type = string
 }
 
-variable "database_location" {
-  type    = string
-  default = null
+variable "region" {
+  type = string
 }
 
 variable "image" {
   type = string
 }
 
-variable "use_free_offer" {
-  type    = bool
-  default = true
-}
-
 module "stack" {
   source = "../../modules/stack"
 
-  environment       = "dev"
-  location          = var.location
-  database_location = var.database_location
-  image             = var.image
-  use_free_offer    = var.use_free_offer
-  max_replicas      = 1
-  jwt_minutes       = 60
+  environment   = "dev"
+  project_id    = var.project_id
+  region        = var.region
+  image         = var.image
+  max_instances = 1
+  jwt_minutes   = 60
 }
 
 output "app_url" {
   value = module.stack.app_url
 }
 
-output "resource_group_name" {
-  value = module.stack.resource_group_name
+output "service_name" {
+  value = module.stack.service_name
+}
+
+output "sql_instance" {
+  value = module.stack.sql_instance
 }

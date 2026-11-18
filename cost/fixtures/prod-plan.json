@@ -6,14 +6,6 @@
         {
           "resources": [
             {
-              "address": "module.stack.azurerm_resource_group.this",
-              "mode": "managed",
-              "type": "azurerm_resource_group",
-              "values": {
-                "location": "eastus"
-              }
-            },
-            {
               "address": "module.stack.random_string.suffix",
               "mode": "managed",
               "type": "random_string",
@@ -26,102 +18,72 @@
               "values": {}
             },
             {
-              "address": "module.stack.module.database.random_password.admin",
+              "address": "module.stack.module.database.google_sql_database_instance.this",
               "mode": "managed",
-              "type": "random_password",
-              "values": {}
-            },
-            {
-              "address": "module.stack.module.database.azurerm_mssql_server.this",
-              "mode": "managed",
-              "type": "azurerm_mssql_server",
-              "values": {}
-            },
-            {
-              "address": "module.stack.module.database.azurerm_mssql_firewall_rule.azure_services",
-              "mode": "managed",
-              "type": "azurerm_mssql_firewall_rule",
-              "values": {}
-            },
-            {
-              "address": "module.stack.module.database.azapi_resource.free[0]",
-              "mode": "managed",
-              "type": "azapi_resource",
+              "type": "google_sql_database_instance",
               "values": {
-                "type": "Microsoft.Sql/servers/databases@2023-08-01",
-                "body": {
-                  "properties": {
-                    "useFreeLimit": true,
-                    "freeLimitExhaustionBehavior": "AutoPause"
+                "region": "us-central1",
+                "settings": [
+                  {
+                    "tier": "db-f1-micro"
                   }
-                }
+                ]
               }
             },
             {
-              "address": "module.stack.module.key_vault.azurerm_key_vault.this",
+              "address": "module.stack.module.database.google_sql_database.this",
               "mode": "managed",
-              "type": "azurerm_key_vault",
+              "type": "google_sql_database",
               "values": {}
             },
             {
-              "address": "module.stack.module.key_vault.azurerm_role_assignment.deployer",
+              "address": "module.stack.module.database.google_sql_user.admin",
               "mode": "managed",
-              "type": "azurerm_role_assignment",
+              "type": "google_sql_user",
               "values": {}
             },
             {
-              "address": "module.stack.module.key_vault.time_sleep.rbac_propagation",
+              "address": "module.stack.module.secrets.google_secret_manager_secret.this[\"database-url\"]",
               "mode": "managed",
-              "type": "time_sleep",
+              "type": "google_secret_manager_secret",
               "values": {}
             },
             {
-              "address": "module.stack.module.key_vault.azurerm_key_vault_secret.this[\"database-url\"]",
+              "address": "module.stack.module.secrets.google_secret_manager_secret.this[\"jwt-secret\"]",
               "mode": "managed",
-              "type": "azurerm_key_vault_secret",
+              "type": "google_secret_manager_secret",
               "values": {}
             },
             {
-              "address": "module.stack.module.key_vault.azurerm_key_vault_secret.this[\"jwt-secret\"]",
+              "address": "module.stack.module.app.google_service_account.app",
               "mode": "managed",
-              "type": "azurerm_key_vault_secret",
+              "type": "google_service_account",
               "values": {}
             },
             {
-              "address": "module.stack.module.app.azurerm_container_app_environment.this",
+              "address": "module.stack.module.app.google_project_iam_member.sql_client",
               "mode": "managed",
-              "type": "azurerm_container_app_environment",
+              "type": "google_project_iam_member",
               "values": {}
             },
             {
-              "address": "module.stack.module.app.azurerm_user_assigned_identity.app",
+              "address": "module.stack.module.app.google_cloud_run_v2_service.this",
               "mode": "managed",
-              "type": "azurerm_user_assigned_identity",
-              "values": {}
-            },
-            {
-              "address": "module.stack.module.app.azurerm_role_assignment.secrets_reader",
-              "mode": "managed",
-              "type": "azurerm_role_assignment",
-              "values": {}
-            },
-            {
-              "address": "module.stack.module.app.time_sleep.rbac_propagation",
-              "mode": "managed",
-              "type": "time_sleep",
-              "values": {}
-            },
-            {
-              "address": "module.stack.module.app.azurerm_container_app.this",
-              "mode": "managed",
-              "type": "azurerm_container_app",
+              "type": "google_cloud_run_v2_service",
               "values": {
+                "location": "us-central1",
                 "template": [
                   {
-                    "container": [
+                    "containers": [
                       {
-                        "cpu": 0.25,
-                        "memory": "0.5Gi"
+                        "resources": [
+                          {
+                            "limits": {
+                              "cpu": "1",
+                              "memory": "512Mi"
+                            }
+                          }
+                        ]
                       }
                     ]
                   }
@@ -129,9 +91,15 @@
               }
             },
             {
-              "address": "module.stack.module.app.azurerm_log_analytics_workspace.this[0]",
+              "address": "module.stack.module.app.google_cloud_run_v2_service_iam_member.public",
               "mode": "managed",
-              "type": "azurerm_log_analytics_workspace",
+              "type": "google_cloud_run_v2_service_iam_member",
+              "values": {}
+            },
+            {
+              "address": "module.stack.google_logging_metric.errors[0]",
+              "mode": "managed",
+              "type": "google_logging_metric",
               "values": {}
             }
           ]

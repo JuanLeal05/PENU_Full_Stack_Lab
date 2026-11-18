@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEPLOY_DIR="$ROOT/.deploy"
 
 die() {
   echo "Error: $*" >&2
@@ -16,11 +15,11 @@ require() {
   done
 }
 
-# Toda la autenticacion sale de `az login`. No hay service principal ni secretos de cliente.
-use_azure_cli_identity() {
-  require az
-  ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv 2>/dev/null)" \
-    || die "ejecuta primero: az login"
-  export ARM_SUBSCRIPTION_ID
-  echo "Suscripcion: $(az account show --query name -o tsv) ($ARM_SUBSCRIPTION_ID)"
+# Toda la autenticacion sale de `gcloud auth login`. No hay llaves JSON ni secretos de cliente.
+use_gcloud_identity() {
+  require gcloud
+  GCP_PROJECT_ID="${GCP_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
+  [[ -n "$GCP_PROJECT_ID" ]] || die "ejecuta primero: gcloud auth login y gcloud config set project <id>"
+  export GCP_PROJECT_ID
+  echo "Proyecto: $GCP_PROJECT_ID ($(gcloud config get-value account 2>/dev/null))"
 }
