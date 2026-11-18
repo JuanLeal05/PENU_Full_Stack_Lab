@@ -65,7 +65,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    # Cloud Run reserva /healthz en las URL publicas (*.run.app): el frontend de Google responde 404.
+    # Las sondas internas lo siguen usando; la interfaz web consulta /api/health.
     @app.get("/healthz")
+    @app.get("/api/health")
     def healthz() -> dict:
         """Liveness: no toca la base, para que el arranque de la app no dependa de ella."""
         return {"status": "ok", "environment": app_settings.environment}

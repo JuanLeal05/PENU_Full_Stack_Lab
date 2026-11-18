@@ -117,4 +117,5 @@ def test_concurrent_retries_of_same_key_charge_once(client, signup):
 
 def test_health_endpoints(client):
     assert client.get("/healthz").json()["status"] == "ok"
+    assert client.get("/api/health").json()["status"] == "ok"
     assert client.get("/readyz").json()["status"] == "ready"
