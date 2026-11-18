@@ -12,5 +12,6 @@
   "secret_versions": 2,
   "secret_accesses_per_month": 2000,
   "state_storage_gb": 1,
+  "registry_storage_gb": 0.3,
   "state_writes_per_month": 500
 }

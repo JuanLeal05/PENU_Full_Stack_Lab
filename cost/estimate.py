@@ -30,7 +30,11 @@ METERS = {
     "secret_10k_access": ("EE2C-7FAC-5E08", "Secret access operations"),
     "gcs_gb_month": ("95FF-2EF5-5EA1", "Standard Storage"),
     "gcs_10k_class_a": ("95FF-2EF5-5EA1", "Class A Operations"),
+    "registry_gb_month": ("149C-F9EC-3994", "Storage"),
 }
+
+# Artifact Registry da 0,5 GB de almacenamiento gratis al mes por cuenta de facturacion.
+REGISTRY_FREE_GB = 0.5
 
 # Recursos sin cargo propio: su costo aparece, si lo hay, en los recursos que los usan.
 FREE_RESOURCES = {
@@ -163,7 +167,9 @@ def estimate_plan(name: str, plan: dict, usage: dict, book: PriceBook, grant: di
             storage = usage["state_storage_gb"] * book.price("gcs_gb_month", region)
             writes = usage["state_writes_per_month"] / 10_000 * book.price("gcs_10k_class_a", region)
             lines.append(Line(name, address, storage + writes, f"{usage['state_storage_gb']} GB"))
-        elif kind in ("google_secret_manager_secret_version", "google_artifact_registry_repository"):
+        elif kind == "google_artifact_registry_repository":
+            lines.append(_registry(name, address, usage, region, book))
+        elif kind == "google_secret_manager_secret_version":
             lines.append(Line(name, address, 0.0, "dentro de la capa gratuita"))
         else:
             unknown.append(address)
@@ -197,6 +203,14 @@ def _database(env, address, values, usage, region, book) -> Line:
     compute = hours * book.price("sql_micro_hour", region)
     storage = usage["database_storage_gb"] * book.price("sql_hdd_gb_month", region)
     return Line(env, address, compute + storage, f"{hours} h de instancia, {usage['database_storage_gb']} GB HDD")
+
+
+def _registry(env, address, usage, region, book) -> Line:
+    """Artifact Registry cobra el almacenamiento de imagenes por GB-mes, tras 0,5 GB gratis."""
+    stored = usage.get("registry_storage_gb", 0.0)
+    billable = max(0.0, stored - REGISTRY_FREE_GB)
+    cost = billable * book.price("registry_gb_month", region)
+    return Line(env, address, cost, f"{stored} GB de imagenes ({REGISTRY_FREE_GB} GB gratis)")
 
 
 def estimate(plans: dict[str, dict], usage: dict, book: PriceBook) -> tuple:
